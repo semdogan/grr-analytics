@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Répartition Géographique - Followers LinkedIn</title>
+
+  <!-- D3 + TopoJSON MUST be loaded BEFORE your script uses them -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <script src="https://unpkg.com/topojson@3"></script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --primary: #0a66c2;
+      --accent: #ff6b35;
+      --dark: #1a1a2e;
+      --light: #f8f9fa;
+      --gray: #6c757d;
+    }
+
+    body {
+      font-family: 'Work Sans', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 2rem;
+      color: var(--dark);
+    }
+
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 24px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, var(--dark) 0%, #2d2d44 100%);
+      padding: 3rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: url('data:image/svg+xml,<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="1" fill="rgba(255,255,255,0.1)"/></svg>');
+      opacity: 0.3;
+    }
+
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: 3.5rem;
+      font-weight: 900;
+      color: white;
+      margin-bottom: 1rem;
+      position: relative;
+      letter-spacing: -1px;
+    }
+
+    .subtitle {
+      font-size: 1.2rem;
+      color: rgba(255, 255, 255, 0.8);
+      font-weight: 300;
+      position: relative;
+    }
+
+    .stats-bar {
+      display: flex;
+      justify-content: space-around;
+      padding: 2rem 3rem;
+      background: var(--light);
+      border-bottom: 2px solid #e9ecef;
+    }
+
+    .stat-item { text-align: center; }
+
+    .stat-number {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--primary);
+      display: block;
+      font-family: 'Playfair Display', serif;
+    }
+
+    .stat-label {
+      font-size: 0.9rem;
+      color: var(--gray);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 0.5rem;
+    }
+
+    .content { padding: 3rem; }
+
+    .map-container {
+      background: white;
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      margin-bottom: 2rem;
+    }
+
+    #map { width: 100%; height: 600px; }
+
+    .country {
+      fill: #e9ecef;
+      stroke: white;
+      stroke-width: 0.5;
+      transition: stroke 0.3s ease, stroke-width 0.3s ease, fill 0.3s ease;
+    }
+
+    .country:hover { stroke: var(--accent); stroke-width: 1.5; }
+
+    /* IMPORTANT FIX:
+       - do NOT use transition: all (it animates r and causes jitter with D3)
+       - do NOT transform: scale SVG circles on hover if you also animate r in D3
+    */
+    .bubble {
+      fill: var(--primary);
+      fill-opacity: 0.6;
+      stroke: var(--primary);
+      stroke-width: 2;
+      cursor: pointer;
+      transition: fill 0.3s ease, stroke 0.3s ease, fill-opacity 0.3s ease;
+    }
+
+    .bubble:hover {
+      fill: var(--accent);
+      stroke: var(--accent);
+      fill-opacity: 0.8;
+      /* transform: scale(1.1);  <-- removed to avoid shake */
+    }
+
+    .tooltip {
+      position: absolute;
+      background: rgba(26, 26, 46, 0.95);
+      color: white;
+      padding: 1rem 1.5rem;
+      border-radius: 12px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      font-size: 0.9rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(10px);
+      z-index: 1000;
+    }
+
+    .tooltip.show { opacity: 1; }
+
+    .tooltip-location {
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      font-size: 1.1rem;
+    }
+
+    .tooltip-followers {
+      color: var(--accent);
+      font-size: 1.3rem;
+      font-weight: 700;
+      font-family: 'Playfair Display', serif;
+    }
+
+    .top-locations {
+      background: var(--light);
+      border-radius: 16px;
+      padding: 2rem;
+    }
+
+    .top-locations h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 2rem;
+      margin-bottom: 1.5rem;
+      color: var(--dark);
+    }
+
+    .location-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1rem;
+    }
+
+    .location-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .location-item:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .location-name { font-weight: 500; color: var(--dark); flex: 1; }
+    .location-count { font-weight: 700; color: var(--primary); font-size: 1.2rem; margin-left: 1rem; }
+
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      margin: 1.5rem 0;
+      padding: 1rem;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    .legend-item { display: flex; align-items: center; gap: 0.5rem; }
+    .legend-circle { border-radius: 50%; background: var(--primary); opacity: 0.6; }
+    .legend-text { font-size: 0.85rem; color: var(--gray); }
+
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+      h1 { font-size: 2rem; }
+      .stats-bar { flex-direction: column; gap: 1.5rem; }
+      .content { padding: 1.5rem; }
+      #map { height: 400px; }
+      .location-list { grid-template-columns: 1fr; }
+    }
+
+    .loading { text-align: center; padding: 3rem; color: var(--gray); }
+
+    .loading-spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid var(--primary);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Distribution Géographique</h1>
+      <div class="subtitle">Analyse des Followers LinkedIn</div>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat-item">
+        <span class="stat-number" id="totalFollowers">-</span>
+        <span class="stat-label">Total Followers</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-number" id="totalLocations">-</span>
+        <span class="stat-label">Localisations</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-number" id="totalCountries">-</span>
+        <span class="stat-label">Pays</span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="map-container">
+        <div class="legend">
+          <div class="legend-item">
+            <div class="legend-circle" style="width: 10px; height: 10px;"></div>
+            <span class="legend-text">&lt; 20 followers</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-circle" style="width: 20px; height: 20px;"></div>
+            <span class="legend-text">20-100 followers</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-circle" style="width: 30px; height: 30px;"></div>
+            <span class="legend-text">&gt; 100 followers</span>
+          </div>
+        </div>
+
+        <div id="map">
+          <div class="loading">
+            <div class="loading-spinner"></div>
+            <p>Chargement de la carte...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="top-locations">
+        <h2>Top 20 Localisations</h2>
+        <div class="location-list" id="locationList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tooltip">
+    <div class="tooltip-location"></div>
+    <div class="tooltip-followers"></div>
+  </div>
+
+  <script>
+    const data = [
+      {location: "Greater Paris Metropolitan Region, France", followers: 1022},
+      {location: "Greater Lyon Area, France", followers: 58},
+      {location: "Cairo, Egypt", followers: 51},
+      {location: "Greater Boston", followers: 46},
+      {location: "London Area, United Kingdom, United Kingdom", followers: 44},
+      {location: "Greater Marseille Metropolitan Area, France", followers: 37},
+      {location: "Greater Bordeaux Metropolitan Area, France", followers: 29},
+      {location: "Greater Toulouse Metropolitan Area, France", followers: 28},
+      {location: "New York City Metropolitan Area", followers: 27},
+      {location: "Greater Lille Metropolitan Area, France", followers: 24},
+      {location: "Greater Barcelona Metropolitan Area, Spain", followers: 23},
+      {location: "Greater Milan Metropolitan Area, Italy", followers: 23},
+      {location: "Grand Tunis Metropolitan Area, Tunisia", followers: 21},
+      {location: "Brussels Metropolitan Area, Belgium", followers: 19},
+      {location: "Lisbon Metropolitan Area, Portugal", followers: 19},
+      {location: "Greater Nantes Metropolitan Area, France", followers: 18},
+      {location: "Greater Grenoble Metropolitan Area, France", followers: 18},
+      {location: "Greater Montpellier Metropolitan Area, France", followers: 16},
+      {location: "Basel Metropolitan Area, Switzerland", followers: 16},
+      {location: "Greater Nancy Area, France", followers: 15},
+      {location: "Greater Strasbourg Metropolitan Area, France", followers: 13},
+      {location: "Lausanne Metropolitan Area, Switzerland", followers: 12},
+      {location: "Algiers, Algeria", followers: 12},
+      {location: "Greater Madrid Metropolitan Area, Spain", followers: 12},
+      {location: "San Francisco Bay Area", followers: 12},
+      {location: "Greater Nice Metropolitan Area, France", followers: 11},
+      {location: "Casablanca Metropolitan Area, Morocco", followers: 11},
+      {location: "Greater Naples Metropolitan Area, Italy", followers: 11},
+      {location: "Greater Rennes Metropolitan Area, France", followers: 11},
+      {location: "Bucharest Metropolitan Area, Romania", followers: 11},
+      {location: "Greater São Paulo Area, Brazil", followers: 10},
+      {location: "The Randstad, Netherlands, Netherlands", followers: 10},
+      {location: "Zürich Metropolitan Area, Switzerland", followers: 10},
+      {location: "Greater Delhi Area, India", followers: 10},
+      {location: "Greater Stockholm Metropolitan Area, Sweden", followers: 10},
+      {location: "Greater Rome Metropolitan Area, Italy", followers: 9},
+      {location: "Évry, France", followers: 8},
+      {location: "Singapore", followers: 8},
+      {location: "Washington DC-Baltimore Area", followers: 8},
+      {location: "Lacaussade, France", followers: 8},
+      {location: "Greater Hyderabad Area, India", followers: 8},
+      {location: "Giza, Egypt", followers: 8},
+      {location: "Greater Caen Area, France", followers: 7},
+      {location: "Geneva Metropolitan Area, Switzerland", followers: 7},
+      {location: "Rabat Metropolitan Area, Morocco", followers: 7},
+      {location: "Greater Limoges Area, France", followers: 7},
+      {location: "Cluj-Napoca Metropolitan Area, Romania", followers: 7},
+      {location: "Louvain Metropolitan Area, Belgium", followers: 7},
+      {location: "Greater Dublin, Ireland", followers: 6},
+      {location: "Greater Rouen Metropolitan Area, France", followers: 6},
+      {location: "Greater Hamburg Area, Germany", followers: 6},
+      {location: "Dakar, Senegal", followers: 6},
+      {location: "Porto Metropolitan Area, Portugal", followers: 6},
+      {location: "Greater Turin Metropolitan Area, Italy", followers: 6},
+      {location: "Greater Munich Metropolitan Area, Germany", followers: 6},
+      {location: "Greater Istanbul, Türkiye", followers: 6},
+      {location: "Tehran, Iran", followers: 6},
+      {location: "Greater Tours Area, France", followers: 6},
+      {location: "Greater Houston", followers: 6},
+      {location: "Greater Toronto Area, Canada, Canada", followers: 6},
+      {location: "Mexico City Metropolitan Area, Mexico", followers: 5},
+      {location: "Greater Cambridge Area, United Kingdom", followers: 5},
+      {location: "Frankfurt Rhine-Main Metropolitan Area, Germany", followers: 5},
+      {location: "Greater Montreal Metropolitan Area, Canada", followers: 5},
+      {location: "Santiago Metropolitan Area, Chile", followers: 5},
+      {location: "Liege Metropolitan Area, Belgium", followers: 5},
+      {location: "Greater Fez Area, Morocco", followers: 5},
+      {location: "Greater Pau Area, France", followers: 5},
+      {location: "Greater Verona Metropolitan Area, Italy", followers: 5},
+      {location: "Greater Besancon Area, France", followers: 5},
+      {location: "Los Angeles Metropolitan Area", followers: 5},
+      {location: "Greater Dijon Area, France", followers: 5},
+      {location: "Greater Bengaluru Area, India", followers: 5},
+      {location: "Greater Genoa Metropolitan Area, Italy", followers: 5},
+      {location: "Greater Metz Area, France", followers: 5},
+      {location: "Greater Innsbruck, Austria", followers: 4},
+      {location: "Greater Toulon Metropolitan Area, France", followers: 4},
+      {location: "Greater Reims Area, France", followers: 4},
+      {location: "Manchester Area, United Kingdom, United Kingdom", followers: 4},
+      {location: "Greater Kolkata Area, India", followers: 4},
+      {location: "Greater Izmir, Türkiye", followers: 4},
+      {location: "Greater Annecy Area, France", followers: 4},
+      {location: "Greater Tubingen Area, Germany", followers: 4},
+      {location: "Alexandria, Egypt", followers: 4},
+      {location: "Antwerp Metropolitan Area, Belgium", followers: 4},
+      {location: "Laval, France", followers: 4},
+      {location: "Greater Tampa Bay Area", followers: 3},
+      {location: "Greater Leeds Area, United Kingdom", followers: 3},
+      {location: "Greater Buenos Aires, Argentina", followers: 3},
+      {location: "Greater Angers Area, France", followers: 3},
+      {location: "Lima Metropolitan Area, Peru", followers: 3},
+      {location: "Cologne Bonn Region, Germany", followers: 3},
+      {location: "Lucerne Metropolitan Area, Switzerland", followers: 3},
+      {location: "Greater Oxford Area, United Kingdom", followers: 3},
+      {location: "Greater Valencia Metropolitan Area, Spain", followers: 3},
+      {location: "San Diego Metropolitan Area", followers: 3},
+      {location: "Sofia Metropolitan Area, Bulgaria", followers: 3},
+      {location: "Greater Ahmedabad Area, India", followers: 3},
+      {location: "Copenhagen Metropolitan Area, Denmark", followers: 3},
+      {location: "Greater Melbourne Area, Australia", followers: 3}
+    ];
+
+    const locationCoordinates = {
+      "France": [2.2137, 46.2276],
+      "Egypt": [30.8025, 26.8206],
+      "United States": [-95.7129, 37.0902],
+      "United Kingdom": [-3.4360, 55.3781],
+      "Spain": [-3.7492, 40.4637],
+      "Italy": [12.5674, 41.8719],
+      "Tunisia": [9.5375, 33.8869],
+      "Belgium": [4.4699, 50.5039],
+      "Portugal": [-8.2245, 39.3999],
+      "Switzerland": [8.2275, 46.8182],
+      "Algeria": [1.6596, 28.0339],
+      "Morocco": [-7.0926, 31.7917],
+      "Romania": [25.4858, 45.9432],
+      "Brazil": [-47.8825, -15.8267],
+      "Netherlands": [5.2913, 52.1326],
+      "India": [78.9629, 20.5937],
+      "Sweden": [18.6435, 60.1282],
+      "Singapore": [103.8198, 1.3521],
+      "Ireland": [-6.2603, 53.4129],
+      "Germany": [10.4515, 51.1657],
+      "Senegal": [-14.4524, 14.4974],
+      "Türkiye": [35.2433, 38.9637],
+      "Iran": [53.6880, 32.4279],
+      "Canada": [-106.3468, 56.1304],
+      "Mexico": [-99.1332, 19.4326],
+      "Chile": [-70.6483, -33.4489],
+      "Austria": [14.5501, 47.5162],
+      "Argentina": [-58.3816, -34.6037],
+      "Peru": [-77.0428, -12.0464],
+      "Bulgaria": [25.4858, 42.7339],
+      "Denmark": [9.5018, 56.2639],
+      "Australia": [133.7751, -25.2744]
+    };
+
+    function getCountryFromLocation(location) {
+      const countryMap = {
+        "France": "France",
+        "Egypt": "Egypt",
+        "Boston": "United States",
+        "United Kingdom": "United Kingdom",
+        "Spain": "Spain",
+        "Italy": "Italy",
+        "Tunisia": "Tunisia",
+        "Belgium": "Belgium",
+        "Portugal": "Portugal",
+        "Switzerland": "Switzerland",
+        "New York": "United States",
+        "Algeria": "Algeria",
+        "Morocco": "Morocco",
+        "San Francisco": "United States",
+        "Romania": "Romania",
+        "Brazil": "Brazil",
+        "Netherlands": "Netherlands",
+        "India": "India",
+        "Sweden": "Sweden",
+        "Singapore": "Singapore",
+        "Washington": "United States",
+        "Ireland": "Ireland",
+        "Germany": "Germany",
+        "Senegal": "Senegal",
+        "Türkiye": "Türkiye",
+        "Iran": "Iran",
+        "Houston": "United States",
+        "Canada": "Canada",
+        "Mexico": "Mexico",
+        "Chile": "Chile",
+        "Austria": "Austria",
+        "Tampa": "United States",
+        "Argentina": "Argentina",
+        "Peru": "Peru",
+        "Bulgaria": "Bulgaria",
+        "Denmark": "Denmark",
+        "San Diego": "United States",
+        "Los Angeles": "United States",
+        "Australia": "Australia"
+      };
+
+      for (const [key, country] of Object.entries(countryMap)) {
+        if (location.includes(key)) return country;
+      }
+      return null;
+    }
+
+    // Aggregate by country
+    const countryData = {};
+    data.forEach(item => {
+      const country = getCountryFromLocation(item.location);
+      if (country && locationCoordinates[country]) {
+        if (!countryData[country]) {
+          countryData[country] = { followers: 0, locations: [], coordinates: locationCoordinates[country] };
+        }
+        countryData[country].followers += item.followers;
+        countryData[country].locations.push(item);
+      }
+    });
+
+    // Stats
+    const totalFollowers = data.reduce((sum, item) => sum + item.followers, 0);
+    const totalLocations = data.length;
+    const totalCountries = Object.keys(countryData).length;
+
+    document.getElementById('totalFollowers').textContent = totalFollowers.toLocaleString('fr-FR');
+    document.getElementById('totalLocations').textContent = totalLocations;
+    document.getElementById('totalCountries').textContent = totalCountries;
+
+    // Top 20 list
+    const topLocations = data.slice(0, 20);
+    const locationList = document.getElementById('locationList');
+    topLocations.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'location-item';
+      div.innerHTML = `
+        <span class="location-name">${item.location}</span>
+        <span class="location-count">${item.followers}</span>
+      `;
+      locationList.appendChild(div);
+    });
+
+    // Map setup
+    const width = document.getElementById('map').offsetWidth;
+    const height = 600;
+
+    const projection = d3.geoMercator()
+      .scale(150)
+      .translate([width / 2, height / 1.5]);
+
+    const path = d3.geoPath().projection(projection);
+
+    const svg = d3.select('#map')
+      .html('')
+      .append('svg')
+      .attr('width', width)
+      .attr('height', height);
+
+    const tooltip = d3.select('#tooltip');
+
+    const radiusScale = d3.scaleSqrt()
+      .domain([0, d3.max(Object.values(countryData), d => d.followers)])
+      .range([5, 50]);
+
+    d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+      .then(world => {
+        const countries = topojson.feature(world, world.objects.countries);
+
+        svg.selectAll('.country')
+          .data(countries.features)
+          .enter()
+          .append('path')
+          .attr('class', 'country')
+          .attr('d', path);
+
+        // Bubbles
+        Object.entries(countryData).forEach(([country, info]) => {
+          const coords = projection(info.coordinates);
+
+          const baseR = radiusScale(info.followers);
+
+          const circle = svg.append('circle')
+            .attr('class', 'bubble')
+            .attr('cx', coords[0])
+            .attr('cy', coords[1])
+            .attr('r', 0);
+
+          // intro animation
+          circle.transition()
+            .duration(1000)
+            .delay(Math.random() * 500)
+            .attr('r', baseR)
+            .on('end', function () {
+
+              d3.select(this)
+                .on('mouseover', function (event) {
+                  d3.select(this)
+                    .interrupt()             // IMPORTANT: avoid stacked transitions
+                    .transition()
+                    .duration(200)
+                    .attr('r', baseR * 1.2);
+
+                  tooltip.select('.tooltip-location').text(country);
+                  tooltip.select('.tooltip-followers').text(`${info.followers} followers`);
+                  tooltip.classed('show', true)
+                    .style('left', (event.pageX + 10) + 'px')
+                    .style('top', (event.pageY - 10) + 'px');
+                })
+                .on('mouseout', function () {
+                  d3.select(this)
+                    .interrupt()
+                    .transition()
+                    .duration(200)
+                    .attr('r', baseR);
+
+                  tooltip.classed('show', false);
+                })
+                .on('mousemove', function (event) {
+                  tooltip
+                    .style('left', (event.pageX + 10) + 'px')
+                    .style('top', (event.pageY - 10) + 'px');
+                });
+            });
+        });
+      })
+      .catch(error => {
+        console.error('Erreur de chargement de la carte:', error);
+        document.getElementById('map').innerHTML =
+          '<p style="text-align: center; padding: 3rem; color: #6c757d;">Erreur de chargement de la carte. Veuillez rafraîchir la page.</p>';
+      });
+  </script>
+</body>
+</html>
